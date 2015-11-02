@@ -151,17 +151,6 @@ public class Algorithms {
 		
 		System.out.println("===Starting hashJoinRelations===");
 		
-		//Check if the relations meet the requirement for
-		//one-pass hash join 
-		if ((R_Blocks/M)<M){//do nothing
-		}else if((S_Blocks/M)<M){//do nothing
-		}else{
-			System.out.println("Aborting Hash Join - "+
-			"Minimum Block Requirement Failed");
-			return -1;
-		}
-		
-		System.out.println("===Relations Met Minimum Requirement for 1-Pass Hash Join===");
 		System.out.println("===Starting Phase 1 of Hash Join - Hashing Relation into Buckets===");
 		
 		Block[][] Rbuckets = hashIntoBucket(relR);
@@ -237,6 +226,8 @@ public class Algorithms {
 		//write the final block to relRS
 		RelationWriter writerRS = relRS.getRelationWriter();
 		writerRS.writeBlock(curBlock);
+		
+		printFirst5Last5Tuples(relRS);
 		
 		System.out.println("===Finishing 1-Pass Hash Join===");
 		System.out.println("+Total # of I/O = "+hashJoinIONum);
@@ -336,6 +327,8 @@ public class Algorithms {
 		 
 		 RelationWriter writerRS = relRS.getRelationWriter();
 		 
+		 //for each tuple in bucket R, look through every tuple in bucket S
+		 //for a match key and join them.
 		 for (Block bR : Rbucket){
 			 if (bR == null) break;
 			 ArrayList<Tuple> tuplesR = bR.tupleLst;
@@ -358,7 +351,7 @@ public class Algorithms {
 				 }
 			 }
 		 }
-		 
+		//used to return multiple object
 		 ArrayList<Object> arr = new ArrayList<Object>();
 		 arr.add(curBlock);
 		 arr.add(relRS);
@@ -376,12 +369,15 @@ public class Algorithms {
 		 
 		 RelationWriter writerRS = relRS.getRelationWriter();
 		 
+		 //simulate loading 1 block at a time into workingBlock for sBucket
 		 int loadBlock = 0;
 		 while (sBucket[loadBlock] != null){
+			 hashJoinIONum++;
 			 Block workingBlock = sBucket[loadBlock];
 			 ArrayList<Tuple> tuplesS = workingBlock.tupleLst;
 			 for (Tuple tS : tuplesS){
 				 if (tS == null) break;
+				 //assume that the entire fBucket is in memory memory buffer
 				 for (Block bF : fBucket){
 					 if (bF == null) break;
 					 ArrayList<Tuple> tuplesF = bF.tupleLst;
@@ -400,7 +396,7 @@ public class Algorithms {
 			 }
 			 loadBlock++;
 		 }
-		 
+		//used to return multiple object
 		 ArrayList<Object> arr = new ArrayList<Object>();
 		 arr.add(curBlock);
 		 arr.add(relRS);
@@ -411,18 +407,57 @@ public class Algorithms {
 		 return arr;
 	 }
 	 
-	 private void printBucket(Block[][] bucket){
-		 for (int i=0;i<bucket.length;i++){
-			 System.out.println("===Printing Bucket "+i+" ===");
-			 if (bucket[i] != null){
-				 for (Block b : bucket[i]){
-					 if (b!=null){
-						 b.print(true);
-					 }
-				 }
-			 }else{
-				 System.out.println("+Null Bucket");
+	 private void printFirst5Last5Tuples(Relation rel){
+		 
+		 //only work correctly if key goes from 0 - 999
+		 
+		 //hold the 1000 buckets
+		 ArrayList<ArrayList<Tuple>> buckets = new ArrayList<ArrayList<Tuple>>();
+		 for (int i=0;i<1000;i++){
+			 buckets.add(new ArrayList<Tuple>());
+		 }
+		 
+		 RelationLoader loader = rel.getRelationLoader();
+		 while (loader.hasNextBlock()){
+			 Block block = loader.loadNextBlocks(1)[0];
+			 ArrayList<Tuple> tuples = block.tupleLst;
+			 for (Tuple t : tuples){
+				 int hkey = t.key%1000;
+				 buckets.get(hkey).add(t);
 			 }
+		 }
+		 
+		 //print total number of tuples
+		 System.out.println("Total # of tuples: "+rel.getNumTuples());
+		 
+		 int count = 0;
+		 //print the first 5 tuples
+		 for (int i=0;i<1000;i++){
+			 if (buckets.get(i)!=null){
+				 if (buckets.get(i).size() == 0) continue;
+				 for (int j=0;j<buckets.get(i).size();j++){
+					 System.out.println("Tuple #" + (count+1) + ": " + 
+						 buckets.get(i).get(j).toString());
+					 count++;
+					 if (count == 5) break;
+				 }
+			 }
+			 if (count == 5) break;
+		 }
+		 
+		 count = 0;
+		 //print the last 5 tuples
+		 for (int i=999;i>-1;i--){
+			 if (buckets.get(i)!=null){
+				 if (buckets.get(i).size()==0) continue; 
+				 for (int j=buckets.get(i).size()-1;j>-1;j--){
+					 System.out.println("Last Tuple #" + (count+1) + ": " + 
+						 buckets.get(i).get(j).toString());
+					 count++;
+					 if (count == 5) break;
+				 }
+			 }
+			 if (count == 5) break;
 		 }
 	 }
 	
