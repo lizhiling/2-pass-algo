@@ -17,6 +17,8 @@ import project2.Relation.RelationWriter;
 
 public class Algorithms {
 	
+	private static int hashJoinIONum = 0;
+	
 
 	public static Comparator<Tuple> TupleComparator = new Comparator<Tuple>() {
 
@@ -141,11 +143,288 @@ public class Algorithms {
 	 */
 	public int hashJoinRelations(Relation relR, Relation relS, Relation relRS){
 		int numIO=0;
+		int R_Blocks = relR.getNumBlocks();
+		int S_Blocks = relS.getNumBlocks();
+		int M = Setting.memorySize;
 		
 		//Insert your code here!
 		
-		return numIO;
-	}
+		System.out.println("===Starting hashJoinRelations===");
+		
+		//Check if the relations meet the requirement for
+		//one-pass hash join 
+		if ((R_Blocks/M)<M){//do nothing
+		}else if((S_Blocks/M)<M){//do nothing
+		}else{
+			System.out.println("Aborting Hash Join - "+
+			"Minimum Block Requirement Failed");
+			return -1;
+		}
+		
+		System.out.println("===Relations Met Minimum Requirement for 1-Pass Hash Join===");
+		System.out.println("===Starting Phase 1 of Hash Join - Hashing Relation into Buckets===");
+		
+		Block[][] Rbuckets = hashIntoBucket(relR);
+		if (Rbuckets == null) return -1;
+		
+		System.out.println("----- ----- -----");
+		
+		Block[][] Sbuckets = hashIntoBucket(relS);
+		if (Sbuckets == null) return -1;
+		
+		System.out.println("----- ----- -----");
+		
+		System.out.println("===Starting Phase 2 of Hash Join - Joining===");
+		
+		int Rbucket_i_Size = 0;
+		int Sbucket_i_Size = 0;
+		Block curBlock = new Block();
+		//used to hold returned objects, which is an unfilled block,
+		//and the relRS
+		ArrayList<Object> arr = new ArrayList<Object>();
+		for (int i=0;i<M-1;i++){
+			System.out.println("+Processing Bucket "+i +" for Phase 2");
+			//perform hash join precondition check
+			for (int l=0;l<Rbuckets[i].length;l++){
+				if (Rbuckets[i][l] != null) Rbucket_i_Size = l+1;
+				else break;
+			}
+			
+			for (int l=0;l<Sbuckets[i].length;l++){
+				if (Sbuckets[i][l] != null) Sbucket_i_Size = l+1;
+				else break;
+			}
+			//case 0 : either one of the bucket is empty
+			if (Rbucket_i_Size == 0 || Sbucket_i_Size == 0){
+				System.out.println("++One of Two Bucket is Empty. - Continue with next Bucket.");
+				//do nothing
+			}
+			//case 1: both bucket can fit in main memory buffer
+			else if ((Rbucket_i_Size+Sbucket_i_Size)<(M-1)){
+				System.out.println("++Both Buckets can Fit in Main Memory Buffer, Block_R = "+
+						Rbucket_i_Size+", Block_S = "+Sbucket_i_Size);
+				//Both buckets are read into buffer
+				hashJoinIONum += Rbucket_i_Size;
+				hashJoinIONum += Sbucket_i_Size; 
+				arr = hashJoin2Buckets(Rbuckets[i], Sbuckets[i], curBlock, relRS);
+			}
+			//case 2: bucket i of R is bigger than or equal to bucket i of S
+			else if(Rbucket_i_Size>=Sbucket_i_Size){
+				System.out.println("++Operating with Bucket i of R in Buffer, Block_R = "+
+						Rbucket_i_Size+", Block_S = "+Sbucket_i_Size);
+				//Bucket R is read into buffer, the blocks in bucket S is read whenever
+				//the previous block has finished processing
+				hashJoinIONum += Rbucket_i_Size;
+				arr = hashJoin1Bucket1Block(Rbuckets[i], Sbuckets[i], curBlock, relRS);
+			}
+			//case 3: bucket i of S is bigger than bucket i of R
+			else if(Sbucket_i_Size>Rbucket_i_Size){
+				System.out.println("++Operating with Bucket i of S in Buffer, Block_R = "+
+						Rbucket_i_Size+", Block_S = "+Sbucket_i_Size);
+				//Bucket S is read into buffer, the blocks in bucket R is read whenever
+				//the previous block has finished processing
+				hashJoinIONum += Sbucket_i_Size;
+				arr = hashJoin1Bucket1Block(Sbuckets[i], Rbuckets[i], curBlock, relRS);
+			}
+			
+			System.out.println("----- ----- -----");
+			
+			//update returned objects
+			curBlock = (Block)arr.get(0);
+			relRS = (Relation)arr.get(1);
+		}
+		
+		//write the final block to relRS
+		RelationWriter writerRS = relRS.getRelationWriter();
+		writerRS.writeBlock(curBlock);
+		
+		System.out.println("===Finishing 1-Pass Hash Join===");
+		System.out.println("+Total # of I/O = "+hashJoinIONum);
+		
+		return hashJoinIONum;
+	}//end of hash join
+	
+	/**
+	 * Addition method for Hash Join implementation. 
+	 */
+	 
+	 private int hashF(int key){
+		 int M = Setting.memorySize;
+		 //Assumes that there is only one key, an integer
+		 //Return haskKey 0 - M-2
+		 return key%(M-1);
+	 }
+
+	 
+	 private Block[][] hashIntoBucket(Relation relR){
+		 
+		int M = Setting.memorySize;
+ 
+		System.out.println("+Beginning Hashing Relation's Tuple into Buckets");
+		System.out.println("+# of Blocks in Relation = "+relR.getNumBlocks());
+		 
+		//Partition relR into M-1 buckets.
+		RelationLoader loaderR = relR.getRelationLoader();
+		//Allocate space for M-1 buckets, each bucket with at most M-2 blocks
+		Block[][] Rbuckets = new Block[M-1][M-2];
+		//temp blocks to hold tuples before inserting into bucket
+		Block[] holdingBlock = new Block[M-1];
+		for (int i=0;i<M-1;i++)
+			holdingBlock[i] = new Block();
+		while (loaderR.hasNextBlock()){
+			Block[] Rblock = loaderR.loadNextBlocks(1);
+			hashJoinIONum++;
+			ArrayList<Tuple> tuples = Rblock[0].tupleLst;
+			for (Tuple t : tuples){
+				//Get the tuple key
+				int hKey = hashF(t.key);
+				//check if current block has available space
+				if (!holdingBlock[hKey].insertTuple(t)){
+					//check if current bucket has available space
+					for (int i=0;i<(M-2);i++){
+						if(Rbuckets[hKey][i]==null){
+							//writing block to bucket on disk.
+							Rbuckets[hKey][i] = holdingBlock[hKey];
+							hashJoinIONum++;
+							holdingBlock[hKey] = new Block();
+							holdingBlock[hKey].insertTuple(t);
+							break;
+						}
+						if (i == (M-3)){
+							//current bucket is full, print error
+							System.out.println("++Aborting Hash Join - "+
+								"Bucket["+hKey+"] overflowed");
+							return null;
+						}
+					}//end of for loop
+				}
+			}///end of tuple for loop
+		}//end of while loop
+			
+		//processed all tuples in relation
+		//insert all blocks into respective buckets
+		for (int i=0;i<M-1;i++){
+			//Check if block has tuple in it
+			ArrayList<Tuple> t = holdingBlock[i].tupleLst;
+			if (!t.isEmpty()){
+				//check if current bucket has available space
+				for (int j=0;j<(M-2);j++){
+					if(Rbuckets[i][j]==null){
+						//writing block to bucket on disk
+						Rbuckets[i][j] = holdingBlock[i];
+						hashJoinIONum++;
+						break;
+					}
+					if (j == (M-3)){
+						//current bucket is full, print error
+						System.out.println("++Aborting Hash Join - "+
+							"Bucket["+i+"] overflowed");
+						return null;
+					}
+				}//end of for loop
+			}
+		}//end of insert block loop
+		System.out.println("+Finishing Hashing Relation's Tuple into Buckets");
+		System.out.println("+hashJoinIONum thusfar = "+hashJoinIONum);
+		return Rbuckets;
+	 }
+	 
+	 private ArrayList<Object> hashJoin2Buckets(Block[] Rbucket, Block[] Sbucket, 
+			 Block curBlock, Relation relRS){
+
+		 System.out.println("+++Starting hashJoin2Buckets");
+		 
+		 RelationWriter writerRS = relRS.getRelationWriter();
+		 
+		 for (Block bR : Rbucket){
+			 if (bR == null) break;
+			 ArrayList<Tuple> tuplesR = bR.tupleLst;
+			 for (Tuple tR : tuplesR){
+				 if (tR == null) break;
+				 for (Block bS : Sbucket){
+					 if (bS == null) break;
+					 ArrayList<Tuple> tuplesS = bS.tupleLst;
+					 for (Tuple tS : tuplesS){
+						 if (tS == null) break;
+						 if (tR.key==tS.key){
+							 JointTuple jt = new JointTuple(tR, tS);
+							 if (!curBlock.insertTuple(jt)){
+								 writerRS.writeBlock(curBlock);
+								 curBlock = new Block();
+								 curBlock.insertTuple(jt);
+							 }
+						 }
+					 }
+				 }
+			 }
+		 }
+		 
+		 ArrayList<Object> arr = new ArrayList<Object>();
+		 arr.add(curBlock);
+		 arr.add(relRS);
+		 
+		 System.out.println("+++Finishing hashJoin2Buckets");
+		 System.out.println("+++hashJoinIONum thusfar = "+hashJoinIONum);
+		 
+		 return arr;
+	 }
+	 
+	 private ArrayList<Object> hashJoin1Bucket1Block(Block[] fBucket, Block[] sBucket,
+			 Block curBlock, Relation relRS){
+		 
+		 System.out.println("+++Starting hashJoin1Bucket1Block");
+		 
+		 RelationWriter writerRS = relRS.getRelationWriter();
+		 
+		 int loadBlock = 0;
+		 while (sBucket[loadBlock] != null){
+			 Block workingBlock = sBucket[loadBlock];
+			 ArrayList<Tuple> tuplesS = workingBlock.tupleLst;
+			 for (Tuple tS : tuplesS){
+				 if (tS == null) break;
+				 for (Block bF : fBucket){
+					 if (bF == null) break;
+					 ArrayList<Tuple> tuplesF = bF.tupleLst;
+					 for(Tuple tF : tuplesF){
+						 if (tF == null) break;
+						 if (tS.key==tF.key){
+							 JointTuple jt = new JointTuple(tS, tF);
+							 if (!curBlock.insertTuple(jt)){
+								 writerRS.writeBlock(curBlock);
+								 curBlock = new Block();
+								 curBlock.insertTuple(jt);
+							 }
+						 }
+					 }
+				 }
+			 }
+			 loadBlock++;
+		 }
+		 
+		 ArrayList<Object> arr = new ArrayList<Object>();
+		 arr.add(curBlock);
+		 arr.add(relRS);
+		 
+		 System.out.println("+++Finishing hashJoin1Bucket1Block");
+		 System.out.println("+++hashJoinIONum thusfar = "+hashJoinIONum);
+		 
+		 return arr;
+	 }
+	 
+	 private void printBucket(Block[][] bucket){
+		 for (int i=0;i<bucket.length;i++){
+			 System.out.println("===Printing Bucket "+i+" ===");
+			 if (bucket[i] != null){
+				 for (Block b : bucket[i]){
+					 if (b!=null){
+						 b.print(true);
+					 }
+				 }
+			 }else{
+				 System.out.println("+Null Bucket");
+			 }
+		 }
+	 }
 	
 	/**
 	 * Join relations relR and relS using Setting.memorySize buffers of memory to produce the result relation relRS
@@ -162,8 +441,6 @@ public class Algorithms {
 		
 		return numIO;
 	}
-
-	
 	
 	/**
 	 * Example usage of classes. 
@@ -261,7 +538,13 @@ public class Algorithms {
 	 * @param arg
 	 */
 	public static void main(String[] arg){
-		Algorithms.testCases();
-
+		//Algorithms.testCases();
+		Relation relR=new Relation("RelR");
+		int numTuples=relR.populateRelationFromFile("RelR.txt");
+		Relation relS=new Relation("RelS");
+		numTuples=relS.populateRelationFromFile("RelS.txt");
+		
+		Algorithms algo = new Algorithms();
+		algo.hashJoinRelations(relR, relS, new Relation("test"));
 	}
 }
