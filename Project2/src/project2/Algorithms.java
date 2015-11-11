@@ -538,7 +538,7 @@ public class Algorithms {
 	 * Testing cases. 
 	 */
 	
-	public static void testCases(){
+	private static void mergeSortTestCases(){
 		Algorithms alg = new Algorithms();
 		
 		System.out.println("=============Test Relation R=======================");
@@ -559,21 +559,16 @@ public class Algorithms {
 		//relS.printRelation(true, true);
 		Assert.assertEquals("Actual IO "+io, relS.getNumBlocks()*3, io);
 		
-//		System.out.println("---------Test Relation S----------");
-//		Relation relS=new Relation("RelS");
-//		numTuples=relR.populateRelationFromFile("RelS.txt");
-//		System.out.println("Relation RelS contains "+numTuples+" tuples.");
-//		io = alg.mergeSortRelation(relS);
-//		Assert.assertTrue(io == relS.getNumBlocks()*3);
-	
+		//		System.out.println("---------Test Relation S----------");
+		//		Relation relS=new Relation("RelS");
+		//		numTuples=relR.populateRelationFromFile("RelS.txt");
+		//		System.out.println("Relation RelS contains "+numTuples+" tuples.");
+		//		io = alg.mergeSortRelation(relS);
+		//		Assert.assertTrue(io == relS.getNumBlocks()*3);
+		
 	}
 	
-	/**
-	 * This main method provided for testing purpose
-	 * @param arg
-	 */
-	public static void main(String[] arg){
-		//Algorithms.testCases();
+	private static void hashSortTestCase(){
 		Relation relR=new Relation("RelR");
 		int numTuples=relR.populateRelationFromFile("RelR.txt");
 		Relation relS=new Relation("RelS");
@@ -581,5 +576,18 @@ public class Algorithms {
 		
 		Algorithms algo = new Algorithms();
 		algo.hashJoinRelations(relR, relS, new Relation("test"));
+	}
+	
+	public static void testCases(){
+		mergeSortTestCases();
+		hashSortTestCase();
+	}
+	
+	/**
+	 * This main method provided for testing purpose
+	 * @param arg
+	 */
+	public static void main(String[] arg){
+		testCases();
 	}
 }
